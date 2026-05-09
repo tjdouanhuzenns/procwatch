@@ -1,0 +1,13 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+vendor/
+coverage.txt
+*.test
+*.prof
+.vscode/
+.idea/
+.env
