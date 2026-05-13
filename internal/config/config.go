@@ -1,14 +1,15 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/BurntSushi/toml"
 )
 
-// RestartPolicy defines when a process should be restarted.
+// RestartPolicy controls when a process should be restarted.
 type RestartPolicy string
 
 const (
@@ -17,90 +18,95 @@ const (
 	RestartNever     RestartPolicy = "never"
 )
 
-// ProcessConfig holds the configuration for a single supervised process.
-type ProcessConfig struct {
-	Name          string        `yaml:"name"`
-	Command       string        `yaml:"command"`
-	Args          []string      `yaml:"args"`
-	RestartPolicy RestartPolicy `yaml:"restart_policy"`
-	MaxRestarts   int           `yaml:"max_restarts"`
-	Backoff       time.Duration `yaml:"backoff"`
-	Env           []string      `yaml:"env"`
-	WorkDir       string        `yaml:"work_dir"`
+// HealthCheck mirrors process.HealthCheck for config parsing.
+type HealthCheck struct {
+	URL      string        `toml:"url"`
+	Interval time.Duration `toml:"interval"`
+	Timeout  time.Duration `toml:"timeout"`
+	Retries  int           `toml:"retries"`
 }
 
-// Config is the top-level procwatch configuration.
+// Process represents a single managed process configuration.
+type Process struct {
+	Name          string        `toml:"name"`
+	Command       string        `toml:"command"`
+	Args          []string      `toml:"args"`
+	Dir           string        `toml:"dir"`
+	Env           []string      `toml:"env"`
+	RestartPolicy RestartPolicy `toml:"restart_policy"`
+	MaxRetries    int           `toml:"max_retries"`
+	HealthCheck   *HealthCheck  `toml:"health_check"`
+}
+
+// Config is the top-level configuration structure.
 type Config struct {
-	LogFormat string          `yaml:"log_format"`
-	Processes []ProcessConfig `yaml:"processes"`
+	Processes []Process `toml:"process"`
 }
 
-// Load reads and parses a YAML config file from the given path.
+// Load reads and parses a TOML config file from the given path.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading config file %q: %w", path, err)
+		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config file %q: %w", path, err)
+	if _, err := toml.Decode(string(data), &cfg); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
+	if err := validate(&cfg); err != nil {
+		return nil, err
 	}
 
 	return &cfg, nil
 }
 
-// validate checks that the config is semantically valid.
-func (c *Config) validate() error {
-	if c.LogFormat == "" {
-		c.LogFormat = "json"
-	}
-	if c.LogFormat != "json" && c.LogFormat != "text" {
-		return fmt.Errorf("log_format must be \"json\" or \"text\", got %q", c.LogFormat)
+func validate(cfg *Config) error {
+	if len(cfg.Processes) == 0 {
+		return errors.New("config must define at least one process")
 	}
 
-	names := make(map[string]bool)
-	for i, p := range c.Processes {
+	seen := make(map[string]bool)
+	for i, p := range cfg.Processes {
 		if p.Name == "" {
 			return fmt.Errorf("process[%d]: name is required", i)
 		}
 		if p.Command == "" {
 			return fmt.Errorf("process %q: command is required", p.Name)
 		}
-		if names[p.Name] {
-			return fmt.Errorf("duplicate process name %q", p.Name)
+		if seen[p.Name] {
+			return fmt.Errorf("duplicate process name: %q", p.Name)
 		}
-		names[p.Name] = true
+		seen[p.Name] = true
 
-		if err := validateRestartPolicy(c.Processes[i].RestartPolicy); err != nil {
+		if p.RestartPolicy == "" {
+			cfg.Processes[i].RestartPolicy = RestartOnFailure
+		} else if err := validateRestartPolicy(p.RestartPolicy); err != nil {
 			return fmt.Errorf("process %q: %w", p.Name, err)
 		}
 
-		if c.Processes[i].RestartPolicy == "" {
-			c.Processes[i].RestartPolicy = RestartOnFailure
-		}
-		if c.Processes[i].MaxRestarts == 0 {
-			c.Processes[i].MaxRestarts = 5
-		}
-		if c.Processes[i].Backoff == 0 {
-			c.Processes[i].Backoff = 2 * time.Second
+		if p.HealthCheck != nil {
+			if err := validateHealthCheck(p.HealthCheck, p.Name); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-// validateRestartPolicy returns an error if the given policy is not a recognised
-// value. An empty string is allowed and will be replaced with the default.
-func validateRestartPolicy(p RestartPolicy) error {
-	switch p {
-	case RestartAlways, RestartOnFailure, RestartNever, "":
+func validateRestartPolicy(policy RestartPolicy) error {
+	switch policy {
+	case RestartAlways, RestartOnFailure, RestartNever:
 		return nil
 	default:
-		return fmt.Errorf("restart_policy must be %q, %q, or %q, got %q",
-			RestartAlways, RestartOnFailure, RestartNever, p)
+		return fmt.Errorf("invalid restart_policy %q (want always|on-failure|never)", policy)
 	}
+}
+
+func validateHealthCheck(hc *HealthCheck, processName string) error {
+	if hc.URL == "" {
+		return fmt.Errorf("process %q: health_check.url is required", processName)
+	}
+	return nil
 }
