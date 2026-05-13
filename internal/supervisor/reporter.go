@@ -46,11 +46,15 @@ func (r *HTTPReporter) Start(ctx context.Context) {
 func (r *HTTPReporter) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	all := r.status.All()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(all)
+	if err := json.NewEncoder(w).Encode(all); err != nil {
+		r.log.Error("failed to encode status response", "err", err)
+	}
 }
 
 func (r *HTTPReporter) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	all := r.metrics.All()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(all)
+	if err := json.NewEncoder(w).Encode(all); err != nil {
+		r.log.Error("failed to encode metrics response", "err", err)
+	}
 }
