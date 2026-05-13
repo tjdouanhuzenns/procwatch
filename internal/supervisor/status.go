@@ -1,85 +1,72 @@
 package supervisor
 
 import (
-	"encoding/json"
-	"net/http"
 	"sync"
 	"time"
-
-	"github.com/user/procwatch/internal/process"
 )
 
-// ProcessStatus is a snapshot of a single process's runtime state.
+// ProcessStatus represents the current status of a supervised process.
 type ProcessStatus struct {
-	Name    string `json:"name"`
-	State   string `json:"state"`
-	Retries int    `json:"retries"`
-	Uptime  string `json:"uptime,omitempty"`
+	Name      string    `json:"name"`
+	State     string    `json:"state"`
+	PID       int       `json:"pid,omitempty"`
+	Restarts  int       `json:"restarts"`
+	StartedAt time.Time `json:"started_at,omitempty"`
+	StoppedAt time.Time `json:"stopped_at,omitempty"`
 }
 
-// StatusReporter exposes process states over HTTP as JSON.
+// StatusReporter tracks and exposes process statuses.
 type StatusReporter struct {
-	mu        sync.RWMutex
-	trackers  map[string]*process.LifecycleTracker
-	startedAt map[string]time.Time
+	mu       sync.RWMutex
+	statuses map[string]*ProcessStatus
 }
 
-// NewStatusReporter creates a reporter with no registered processes.
+// NewStatusReporter creates a new StatusReporter.
 func NewStatusReporter() *StatusReporter {
 	return &StatusReporter{
-		trackers:  make(map[string]*process.LifecycleTracker),
-		startedAt: make(map[string]time.Time),
+		statuses: make(map[string]*ProcessStatus),
 	}
 }
 
-// Register adds a lifecycle tracker for the named process.
-func (sr *StatusReporter) Register(name string, lt *process.LifecycleTracker) {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	sr.trackers[name] = lt
+// Update sets or updates the status for a named process.
+func (s *StatusReporter) Update(name, state string, pid, restarts int, startedAt, stoppedAt time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.statuses[name] = &ProcessStatus{
+		Name:      name,
+		State:     state,
+		PID:       pid,
+		Restarts:  restarts,
+		StartedAt: startedAt,
+		StoppedAt: stoppedAt,
+	}
 }
 
-// MarkStarted records the time a process entered the running state.
-func (sr *StatusReporter) MarkStarted(name string) {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	sr.startedAt[name] = time.Now()
+// Get returns the status for a named process, and whether it was found.
+func (s *StatusReporter) Get(name string) (ProcessStatus, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ps, ok := s.statuses[name]
+	if !ok {
+		return ProcessStatus{}, false
+	}
+	return *ps, true
 }
 
-// Snapshot returns the current status of all registered processes.
-func (sr *StatusReporter) Snapshot() []ProcessStatus {
-	sr.mu.RLock()
-	defer sr.mu.RUnlock()
-
-	out := make([]ProcessStatus, 0, len(sr.trackers))
-	for name, lt := range sr.trackers {
-		ps := ProcessStatus{
-			Name:  name,
-			State: lt.Current().String(),
-		}
-		if t, ok := sr.startedAt[name]; ok && lt.Current() == process.StateRunning {
-			ps.Uptime = time.Since(t).Round(time.Second).String()
-		}
-		h := lt.History()
-		for _, ch := range h {
-			if ch.To == process.StateStarting {
-				ps.Retries++
-			}
-		}
-		if ps.Retries > 0 {
-			ps.Retries-- // first start is not a retry
-		}
-		out = append(out, ps)
+// All returns a snapshot of all current process statuses.
+func (s *StatusReporter) All() []ProcessStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]ProcessStatus, 0, len(s.statuses))
+	for _, ps := range s.statuses {
+		out = append(out, *ps)
 	}
 	return out
 }
 
-// ServeHTTP implements http.Handler and writes the JSON status response.
-func (sr *StatusReporter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(sr.Snapshot())
+// Remove deletes the status entry for a named process.
+func (s *StatusReporter) Remove(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.statuses, name)
 }
