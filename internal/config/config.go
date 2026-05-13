@@ -31,8 +31,8 @@ type ProcessConfig struct {
 
 // Config is the top-level procwatch configuration.
 type Config struct {
-	LogFormat  string          `yaml:"log_format"`
-	Processes  []ProcessConfig `yaml:"processes"`
+	LogFormat string          `yaml:"log_format"`
+	Processes []ProcessConfig `yaml:"processes"`
 }
 
 // Load reads and parses a YAML config file from the given path.
@@ -76,6 +76,10 @@ func (c *Config) validate() error {
 		}
 		names[p.Name] = true
 
+		if err := validateRestartPolicy(c.Processes[i].RestartPolicy); err != nil {
+			return fmt.Errorf("process %q: %w", p.Name, err)
+		}
+
 		if c.Processes[i].RestartPolicy == "" {
 			c.Processes[i].RestartPolicy = RestartOnFailure
 		}
@@ -87,4 +91,16 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
+}
+
+// validateRestartPolicy returns an error if the given policy is not a recognised
+// value. An empty string is allowed and will be replaced with the default.
+func validateRestartPolicy(p RestartPolicy) error {
+	switch p {
+	case RestartAlways, RestartOnFailure, RestartNever, "":
+		return nil
+	default:
+		return fmt.Errorf("restart_policy must be %q, %q, or %q, got %q",
+			RestartAlways, RestartOnFailure, RestartNever, p)
+	}
 }
