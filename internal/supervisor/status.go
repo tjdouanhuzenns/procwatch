@@ -1,70 +1,62 @@
 package supervisor
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
 
-// ProcessStatus represents the current status of a supervised process.
+// ProcessStatus represents the last-known status of a supervised process.
 type ProcessStatus struct {
 	Name      string    `json:"name"`
 	State     string    `json:"state"`
 	PID       int       `json:"pid,omitempty"`
-	Restarts  int       `json:"restarts"`
-	StartedAt time.Time `json:"started_at,omitempty"`
-	StoppedAt time.Time `json:"stopped_at,omitempty"`
+	ExitCode  int       `json:"exit_code,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// StatusReporter tracks and exposes process statuses.
+// StatusReporter stores and retrieves process status entries.
 type StatusReporter struct {
 	mu       sync.RWMutex
-	statuses map[string]*ProcessStatus
+	statuses map[string]ProcessStatus
 }
 
-// NewStatusReporter creates a new StatusReporter.
+// NewStatusReporter returns an initialised StatusReporter.
 func NewStatusReporter() *StatusReporter {
-	return &StatusReporter{
-		statuses: make(map[string]*ProcessStatus),
-	}
+	return &StatusReporter{statuses: make(map[string]ProcessStatus)}
 }
 
-// Update sets or updates the status for a named process.
-func (s *StatusReporter) Update(name, state string, pid, restarts int, startedAt, stoppedAt time.Time) {
+// Update stores or overwrites the status for a process.
+func (s *StatusReporter) Update(name string, ps ProcessStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.statuses[name] = &ProcessStatus{
-		Name:      name,
-		State:     state,
-		PID:       pid,
-		Restarts:  restarts,
-		StartedAt: startedAt,
-		StoppedAt: stoppedAt,
-	}
+	ps.UpdatedAt = time.Now()
+	s.statuses[name] = ps
 }
 
-// Get returns the status for a named process, and whether it was found.
-func (s *StatusReporter) Get(name string) (ProcessStatus, bool) {
+// Get retrieves the status for a named process.
+func (s *StatusReporter) Get(name string) (ProcessStatus, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	ps, ok := s.statuses[name]
 	if !ok {
-		return ProcessStatus{}, false
+		return ProcessStatus{}, fmt.Errorf("no status for process %q", name)
 	}
-	return *ps, true
+	return ps, nil
 }
 
-// All returns a snapshot of all current process statuses.
+// All returns a slice of all current process statuses.
 func (s *StatusReporter) All() []ProcessStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]ProcessStatus, 0, len(s.statuses))
 	for _, ps := range s.statuses {
-		out = append(out, *ps)
+		out = append(out, ps)
 	}
 	return out
 }
 
-// Remove deletes the status entry for a named process.
+// Remove deletes the status entry for a process.
 func (s *StatusReporter) Remove(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
