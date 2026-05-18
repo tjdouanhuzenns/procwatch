@@ -13,6 +13,19 @@ func newShutdownLogger(buf *bytes.Buffer) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
+// newTestShutdownHandler creates a ShutdownHandler with a buffer-backed logger
+// for use in tests, returning the handler and the log buffer for inspection.
+func newTestShutdownHandler(t *testing.T) (*ShutdownHandler, context.CancelFunc, *bytes.Buffer) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = ctx
+	drainer := NewDrainer(DefaultDrainConfig())
+	var buf bytes.Buffer
+	log := newShutdownLogger(&buf)
+	h := NewShutdownHandler(cancel, drainer, log)
+	return h, cancel, &buf
+}
+
 func TestShutdownHandler_CancelsOnSignal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
