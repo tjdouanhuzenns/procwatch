@@ -101,6 +101,17 @@ func (lt *LifecycleTracker) History() []StateChange {
 	return out
 }
 
+// LastChange returns the most recent state change, and false if no transitions
+// have occurred yet.
+func (lt *LifecycleTracker) LastChange() (StateChange, bool) {
+	lt.mu.RLock()
+	defer lt.mu.RUnlock()
+	if len(lt.history) == 0 {
+		return StateChange{}, false
+	}
+	return lt.history[len(lt.history)-1], true
+}
+
 // isValidTransition defines the allowed state machine edges.
 func isValidTransition(from, to State) bool {
 	allowed := map[State][]State{
