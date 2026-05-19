@@ -1,83 +1,102 @@
 package supervisor
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/user/procwatch/internal/logger"
 )
 
-func freePort(t *testing.T) string {
+func freePort(t *testing.T) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("could not find free port: %v", err)
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return fmt.Sprintf("127.0.0.1:%d", port)
+	l.Close()
+	return port
 }
 
 func TestHTTPReporter_StatusEndpoint(t *testing.T) {
-	addr := freePort(t)
+	port := freePort(t)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+
 	sr := NewStatusReporter()
-	sr.Update("svc", ProcessStatus{Name: "svc", State: "running"})
-	mc := NewMetricsCollector()
-	log := logger.New(nil, "info")
+	sr.Update(ProcessStatus{Name: "svc", State: "running"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	rep := NewHTTPReporter(addr, sr, mc, log)
-	rep.Start(ctx)
-	time.Sleep(50 * time.Millisecond)
+	rep := NewHTTPReporter(addr, sr, NewMetricsCollector(), NewHealthReporter())
+	go rep.ListenAndServe()
+	defer rep.Close()
+	time.Sleep(20 * time.Millisecond)
 
 	resp, err := http.Get("http://" + addr + "/status")
 	if err != nil {
-		t.Fatalf("GET /status: %v", err)
+		t.Fatalf("request failed: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected 200, got %d", resp.StatusCode)
+
+	var statuses []ProcessStatus
+	if err := json.NewDecoder(resp.Body).Decode(&statuses); err != nil {
+		t.Fatalf("decode failed: %v", err)
 	}
-	var out []ProcessStatus
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(out) != 1 || out[0].Name != "svc" {
-		t.Errorf("unexpected status output: %+v", out)
+	if len(statuses) != 1 || statuses[0].Name != "svc" {
+		t.Errorf("unexpected statuses: %+v", statuses)
 	}
 }
 
 func TestHTTPReporter_MetricsEndpoint(t *testing.T) {
-	addr := freePort(t)
-	sr := NewStatusReporter()
+	port := freePort(t)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+
 	mc := NewMetricsCollector()
-	mc.RecordStart("worker")
-	log := logger.New(nil, "info")
+	mc.RecordStart("svc")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	rep := NewHTTPReporter(addr, sr, mc, log)
-	rep.Start(ctx)
-	time.Sleep(50 * time.Millisecond)
+	rep := NewHTTPReporter(addr, NewStatusReporter(), mc, NewHealthReporter())
+	go rep.ListenAndServe()
+	defer rep.Close()
+	time.Sleep(20 * time.Millisecond)
 
 	resp, err := http.Get("http://" + addr + "/metrics")
 	if err != nil {
-		t.Fatalf("GET /metrics: %v", err)
+		t.Fatalf("request failed: %v", err)
 	}
 	defer resp.Body.Close()
-	var out []ProcessMetrics
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
+
+	var all []ProcessMetrics
+	if err := json.NewDecoder(resp.Body).Decode(&all); err != nil {
+		t.Fatalf("decode failed: %v", err)
 	}
-	if len(out) != 1 || out[0].Name != "worker" {
-		t.Errorf("unexpected metrics output: %+v", out)
+	if len(all) != 1 || all[0].Name != "svc" {
+		t.Errorf("unexpected metrics: %+v", all)
+	}
+}
+
+func TestHTTPReporter_HealthEndpoint(t *testing.T) {
+	port := freePort(t)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+
+	hr := NewHealthReporter()
+	hr.Record("svc", HealthHealthy, "ok")
+
+	rep := NewHTTPReporter(addr, NewStatusReporter(), NewMetricsCollector(), hr)
+	go rep.ListenAndServe()
+	defer rep.Close()
+	time.Sleep(20 * time.Millisecond)
+
+	resp, err := http.Get("http://" + addr + "/health")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var reports []HealthReport
+	if err := json.NewDecoder(resp.Body).Decode(&reports); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if len(reports) != 1 || reports[0].Process != "svc" {
+		t.Errorf("unexpected health reports: %+v", reports)
 	}
 }

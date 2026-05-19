@@ -1,60 +1,60 @@
 package supervisor
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"time"
-
-	"github.com/user/procwatch/internal/logger"
 )
 
-// HTTPReporter exposes process status and metrics over HTTP.
+// HTTPReporter serves process status, metrics, and health over HTTP.
 type HTTPReporter struct {
-	server  *http.Server
 	status  *StatusReporter
 	metrics *MetricsCollector
-	log     *logger.Logger
+	health  *HealthReporter
+	server  *http.Server
 }
 
-// NewHTTPReporter creates an HTTPReporter bound to addr.
-func NewHTTPReporter(addr string, sr *StatusReporter, mc *MetricsCollector, log *logger.Logger) *HTTPReporter {
-	r := &HTTPReporter{status: sr, metrics: mc, log: log}
+// NewHTTPReporter creates an HTTPReporter bound to the given address.
+func NewHTTPReporter(addr string, status *StatusReporter, metrics *MetricsCollector, health *HealthReporter) *HTTPReporter {
+	r := &HTTPReporter{
+		status:  status,
+		metrics: metrics,
+		health:  health,
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", r.handleStatus)
 	mux.HandleFunc("/metrics", r.handleMetrics)
-	r.server = &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	mux.HandleFunc("/health", r.handleHealth)
+	r.server = &http.Server{
+		Addr:        addr,
+		Handler:     mux,
+		ReadTimeout: 5 * time.Second,
+	}
 	return r
 }
 
-// Start begins serving HTTP in a goroutine. It returns when the server is ready or ctx is done.
-func (r *HTTPReporter) Start(ctx context.Context) {
-	go func() {
-		r.log.Info("http reporter listening", "addr", r.server.Addr)
-		if err := r.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			r.log.Error("http reporter error", "err", err)
-		}
-	}()
-	go func() {
-		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = r.server.Shutdown(shutCtx)
-	}()
+func (r *HTTPReporter) ListenAndServe() error {
+	return r.server.ListenAndServe()
+}
+
+func (r *HTTPReporter) Close() error {
+	return r.server.Close()
 }
 
 func (r *HTTPReporter) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	all := r.status.All()
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(all); err != nil {
-		r.log.Error("failed to encode status response", "err", err)
-	}
+	json.NewEncoder(w).Encode(all)
 }
 
 func (r *HTTPReporter) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	all := r.metrics.All()
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(all); err != nil {
-		r.log.Error("failed to encode metrics response", "err", err)
-	}
+	json.NewEncoder(w).Encode(all)
+}
+
+func (r *HTTPReporter) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	all := r.health.All()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(all)
 }
