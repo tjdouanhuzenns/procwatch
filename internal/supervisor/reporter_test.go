@@ -20,17 +20,24 @@ func freePort(t *testing.T) int {
 	return port
 }
 
-func TestHTTPReporter_StatusEndpoint(t *testing.T) {
+// startReporter starts an HTTPReporter on a free port and returns the address.
+// The reporter is automatically closed when the test finishes.
+func startReporter(t *testing.T, sr *StatusReporter, mc *MetricsCollector, hr *HealthReporter) string {
+	t.Helper()
 	port := freePort(t)
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	rep := NewHTTPReporter(addr, sr, mc, hr)
+	go rep.ListenAndServe()
+	t.Cleanup(func() { rep.Close() })
+	time.Sleep(20 * time.Millisecond)
+	return addr
+}
 
+func TestHTTPReporter_StatusEndpoint(t *testing.T) {
 	sr := NewStatusReporter()
 	sr.Update(ProcessStatus{Name: "svc", State: "running"})
 
-	rep := NewHTTPReporter(addr, sr, NewMetricsCollector(), NewHealthReporter())
-	go rep.ListenAndServe()
-	defer rep.Close()
-	time.Sleep(20 * time.Millisecond)
+	addr := startReporter(t, sr, NewMetricsCollector(), NewHealthReporter())
 
 	resp, err := http.Get("http://" + addr + "/status")
 	if err != nil {
@@ -48,16 +55,10 @@ func TestHTTPReporter_StatusEndpoint(t *testing.T) {
 }
 
 func TestHTTPReporter_MetricsEndpoint(t *testing.T) {
-	port := freePort(t)
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-
 	mc := NewMetricsCollector()
 	mc.RecordStart("svc")
 
-	rep := NewHTTPReporter(addr, NewStatusReporter(), mc, NewHealthReporter())
-	go rep.ListenAndServe()
-	defer rep.Close()
-	time.Sleep(20 * time.Millisecond)
+	addr := startReporter(t, NewStatusReporter(), mc, NewHealthReporter())
 
 	resp, err := http.Get("http://" + addr + "/metrics")
 	if err != nil {
@@ -75,16 +76,10 @@ func TestHTTPReporter_MetricsEndpoint(t *testing.T) {
 }
 
 func TestHTTPReporter_HealthEndpoint(t *testing.T) {
-	port := freePort(t)
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-
 	hr := NewHealthReporter()
 	hr.Record("svc", HealthHealthy, "ok")
 
-	rep := NewHTTPReporter(addr, NewStatusReporter(), NewMetricsCollector(), hr)
-	go rep.ListenAndServe()
-	defer rep.Close()
-	time.Sleep(20 * time.Millisecond)
+	addr := startReporter(t, NewStatusReporter(), NewMetricsCollector(), hr)
 
 	resp, err := http.Get("http://" + addr + "/health")
 	if err != nil {
