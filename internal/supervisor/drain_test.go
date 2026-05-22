@@ -81,6 +81,20 @@ func TestDrainer_EmptyDrainImmediately(t *testing.T) {
 	}
 }
 
+// TestDrainer_ReleaseUntracked verifies that releasing a name that was never
+// tracked does not affect the active count or cause a panic.
+func TestDrainer_ReleaseUntracked(t *testing.T) {
+	cfg := DefaultDrainConfig()
+	d := NewDrainer(cfg)
+	d.Track("a")
+
+	// Release a name that was never tracked; count should remain 1.
+	d.Release("unknown")
+	if d.ActiveCount() != 1 {
+		t.Fatalf("expected 1 active after releasing untracked name, got %d", d.ActiveCount())
+	}
+}
+
 func TestDefaultDrainConfig(t *testing.T) {
 	cfg := DefaultDrainConfig()
 	if cfg.Timeout <= 0 {
