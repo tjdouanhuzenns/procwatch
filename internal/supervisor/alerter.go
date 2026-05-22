@@ -50,10 +50,11 @@ func (a *Alerter) matches(ev WatchEvent) bool {
 	return false
 }
 
-func (a *Alerter) emit(ev WatchEvent) {
-	fmt.Fprintf(
+func (a *Alerter) emit(ev WatchEvent) error {
+	_, err := fmt.Fprintf(
 		a.out,
 		`{"alert":true,"process":%q,"old_status":%q,"new_status":%q,"at":%q}`+"\n",
 		ev.ProcessName, ev.OldStatus, ev.NewStatus, ev.At.UTC().Format("2006-01-02T15:04:05Z"),
 	)
+	return err
 }
