@@ -92,3 +92,16 @@ func (c *PauseResumeController) Remove(name string) {
 	defer c.mu.Unlock()
 	delete(c.states, name)
 }
+
+// PausedNames returns a slice of the names of all currently paused processes.
+func (c *PauseResumeController) PausedNames() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var names []string
+	for name, state := range c.states {
+		if state == PauseStatePaused {
+			names = append(names, name)
+		}
+	}
+	return names
+}
