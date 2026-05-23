@@ -29,6 +29,7 @@ func NewMetricsCollector() *MetricsCollector {
 }
 
 // RecordStart records that a process has started.
+// If the process has been started before, the restart counter is incremented.
 func (m *MetricsCollector) RecordStart(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -39,7 +40,8 @@ func (m *MetricsCollector) RecordStart(name string) {
 	entry.LastStarted = time.Now()
 }
 
-// RecordExit records that a process has exited.
+// RecordExit records that a process has exited and accumulates the session
+// uptime into TotalUptime.
 func (m *MetricsCollector) RecordExit(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -53,6 +55,7 @@ func (m *MetricsCollector) RecordExit(name string) {
 }
 
 // Get returns a copy of metrics for the named process.
+// The Uptime field is computed on the fly if the process is currently running.
 func (m *MetricsCollector) Get(name string) (ProcessMetrics, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -68,6 +71,7 @@ func (m *MetricsCollector) Get(name string) (ProcessMetrics, bool) {
 }
 
 // All returns a snapshot of metrics for all processes.
+// The Uptime field of each entry is computed on the fly for running processes.
 func (m *MetricsCollector) All() []ProcessMetrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -80,6 +84,13 @@ func (m *MetricsCollector) All() []ProcessMetrics {
 		out = append(out, copy)
 	}
 	return out
+}
+
+// Reset clears all recorded metrics for the named process.
+func (m *MetricsCollector) Reset(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.metrics, name)
 }
 
 func (m *MetricsCollector) getOrCreate(name string) *ProcessMetrics {
