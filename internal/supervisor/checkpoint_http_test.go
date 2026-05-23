@@ -79,6 +79,16 @@ func TestCheckpointHTTP_DeleteSpecific(t *testing.T) {
 	}
 }
 
+func TestCheckpointHTTP_DeleteMissingReturns404(t *testing.T) {
+	mux, _ := newCheckpointMux()
+	req := httptest.NewRequest(http.MethodDelete, "/checkpoints/svc/nonexistent", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
 func TestCheckpointHTTP_MissingProcessQueryParam(t *testing.T) {
 	mux, _ := newCheckpointMux()
 	req := httptest.NewRequest(http.MethodGet, "/checkpoints", nil)
