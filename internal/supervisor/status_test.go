@@ -81,3 +81,14 @@ func TestStatusReporter_UpdateOverwrites(t *testing.T) {
 		t.Errorf("expected 1 restart, got %d", ps.Restarts)
 	}
 }
+
+func TestStatusReporter_RemoveNonexistent(t *testing.T) {
+	// Removing a process that was never added should not panic or error.
+	r := NewStatusReporter()
+	r.Remove("ghost")
+
+	_, ok := r.Get("ghost")
+	if ok {
+		t.Error("expected Get to return false after removing nonexistent process")
+	}
+}
